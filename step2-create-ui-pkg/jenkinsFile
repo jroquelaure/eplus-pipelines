@@ -1,0 +1,64 @@
+node(){
+    stage 'get sources'
+        git url: 'https://github.com/jfrogtraining/project-examples.git', branch: 'eplus-orbitera'
+        
+    stage 'configure Artifactory integration'
+        def server = Artifactory.server('europeMain')
+        def buildInfo = Artifactory.newBuildInfo()
+        def username = "jenkins-ci"
+        def password = "AKCp5aUQUe6m8hMXUna17PCvfX2hcw3e7JWs69sHwcBhxuNR64kvgFydRy4tWeCcBJn6UaZPQ"
+        def authUrl = "$server.url/api/npm/auth"
+        def bowerUrl = "$server.url/api/bower/bower"
+        def npmUrl = "$server.url/api/npm/npm"
+        
+        env.NODEJS_HOME = "${tool 'node'}"
+        env.PATH="${env.NODEJS_HOME}/bin:${env.PATH}"
+        dir ('./tutorial/step2-create-ui-pkg/'){
+            sh "curl -fL https://getcli.jfrog.io | sh"
+            sh "chmod +x jfrog"
+        
+            sh "./jfrog rt config --url $server.url --user $username --apikey $password"
+        }
+    stage 'build the project'
+    
+        dir ('./tutorial/step2-create-ui-pkg/'){
+            sh "npm install shelljs"
+            sh "npm version 0.2.1-$buildInfo.number --force --no-git-tag-version"
+            sh "./jfrog rt npm-install npm --build-name=${env.JOB_NAME} --build-number=${env.BUILD_NUMBER}"
+        }
+       // sh "npm install shelljs"
+        //sh "npm version 0.2.1-$buildInfo.number --force --no-git-tag-version"
+        
+        //sh "./jfrog rt npm-install npm --build-name=${env.JOB_NAME} --build-number=${env.BUILD_NUMBER}"
+        
+        //sh "npm pack"
+    
+    stage 'publish to Artifactory'
+        dir ('./tutorial/step2-create-ui-pkg/'){
+            sh "./jfrog rt bce ${env.JOB_NAME} ${env.BUILD_NUMBER}"
+
+            sh "./jfrog rt npm-publish npm --build-name=${env.JOB_NAME} --build-number=${env.BUILD_NUMBER}"
+            sh "./jfrog rt bp ${env.JOB_NAME} ${env.BUILD_NUMBER}"
+        }
+        
+    stage 'test'
+        //TODO some test
+    stage 'promote'
+         def promotionConfig = [
+        // Mandatory parameters
+        'buildName'          : buildInfo.name,
+        'buildNumber'        : buildInfo.number,
+        'targetRepo'         : 'npm-release-local',
+
+        // Optional parameters
+        'comment'            : 'ready for release',
+        'sourceRepo'         : 'npm-dev-local',
+        'status'             : 'Released',
+        'includeDependencies': true,
+        'copy'               : true
+    ]
+
+    // Promote build
+    server.promote promotionConfig
+    
+}

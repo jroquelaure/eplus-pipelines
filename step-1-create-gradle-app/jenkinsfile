@@ -1,0 +1,62 @@
+node() {
+    stage 'Build staging release'
+        git url: 'https://github.com/jroquelaure/frogsws.git'
+      
+    //sh './increment.sh'
+
+    stage 'Artifactory configuration' 
+     // Create an Artifactory server instance, as described above in this article:
+        def server = Artifactory.server('europeMain')
+    // Create and set an Artifactory Gradle Build instance:
+        def rtGradle = Artifactory.newGradleBuild()
+        rtGradle.resolver server: server, repo: 'gradle-release'
+        rtGradle.deployer server: server, repo: 'gradle-dev-local'
+    // In case the Artifactory Gradle Plugin is already applied in your Gradle script:
+   // rtGradle.usesPlugin = false
+    // Set a Gradle Tool defined in Jenkins "Manage":
+    rtGradle.tool = 'GRADLE_TOOL'
+    stage 'Run Gradle and publish to Artifactory'
+    // Run Gradle:
+    def buildInfo = rtGradle.run rootDir: ".", buildFile: 'build.gradle', tasks: "clean artifactoryPublish --stacktrace".toString()
+    // Publish the build-info to Artifactory:
+    server.publishBuildInfo buildInfo
+    
+    stage 'test'
+        //TODO some test
+    stage('Xray scan')
+    {
+        def xrayConfig = [
+          //Mandatory parameters
+          'buildName'         : env.JOB_NAME,
+          'buildNumber'       :  env.BUILD_NUMBER,
+
+          //Optional
+          'failBuild'        :false //Default
+        ]
+
+        // Scan xray build
+        def xrayResults = server.xrayScan xrayConfig
+        // Print full report from xray
+        echo xrayResults as String
+    }
+    stage 'promote'
+         def promotionConfig = [
+        // Mandatory parameters
+        'buildName'          : buildInfo.name,
+        'buildNumber'        : buildInfo.number,
+        'targetRepo'         : 'gradle-release-local',
+
+        // Optional parameters
+        'comment'            : 'ready for release',
+        'sourceRepo'         : 'gradle-dev-local',
+        'status'             : 'Released',
+        //set to false till following JIRA fixed : https://www.jfrog.com/jira/browse/RTFACT-9343
+        'includeDependencies': false,
+        'copy'               : true
+    ]
+
+    // Promote build
+    server.promote promotionConfig
+    
+    
+}
